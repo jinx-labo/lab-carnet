@@ -21,6 +21,7 @@ class ContactModel(Base):
     id = Column(Integer, primary_key=True, index=True)
     nom = Column(String(200), nullable=False)
     telephone = Column(String(50), nullable=False)
+    email = Column(String(200), nullable=True)
     note = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -31,17 +32,20 @@ app = FastAPI(title="carnet", description="API Carnet de Contacts", version="1.0
 class ContactCreate(BaseModel):
     nom: str
     telephone: str
+    email: Optional[str] = None
     note: Optional[str] = None
 
 class ContactUpdate(BaseModel):
     nom: Optional[str] = None
     telephone: Optional[str] = None
+    email: Optional[str] = None
     note: Optional[str] = None
 
 class ContactOut(BaseModel):
     id: int
     nom: str
     telephone: str
+    email: Optional[str]
     note: Optional[str]
     created_at: datetime
 
@@ -78,6 +82,7 @@ def create_contact(contact: ContactCreate, db: Session = Depends(get_db)):
     db_contact = ContactModel(
         nom=contact.nom.strip(),
         telephone=contact.telephone.strip(),
+        email=contact.email.strip() if contact.email else None,
         note=contact.note.strip() if contact.note else None,
     )
     db.add(db_contact)
@@ -105,6 +110,8 @@ def update_contact(contact_id: int, data: ContactUpdate, db: Session = Depends(g
         if not data.telephone.strip():
             raise HTTPException(status_code=400, detail="Le téléphone ne peut pas être vide.")
         contact.telephone = data.telephone.strip()
+    if data.email is not None:
+        contact.email = data.email.strip() if data.email.strip() else None
     if data.note is not None:
         contact.note = data.note.strip() if data.note.strip() else None
     db.commit()
@@ -158,6 +165,7 @@ def index():
   .contact-info { flex: 1; min-width: 0; }
   .contact-info strong { display: block; font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .contact-info .phone { color: #4a90d9; font-size: .88rem; margin: .15rem 0; }
+  .contact-info .email { color: #718096; font-size: .85rem; margin: .1rem 0; }
   .contact-info .note { color: #718096; font-size: .82rem; margin-top: .25rem; white-space: pre-wrap; word-break: break-word; }
   .contact-actions { display: flex; gap: .4rem; flex-shrink: 0; flex-direction: column; align-items: flex-end; }
   .empty { text-align: center; color: #a0aec0; padding: 2rem 0; font-size: .95rem; }
@@ -192,6 +200,10 @@ def index():
       <input type="tel" id="telephone" placeholder="06 12 34 56 78" autocomplete="off"/>
     </div>
     <div class="form-group">
+      <label for="email">Email</label>
+      <input type="email" id="email" placeholder="jean@exemple.com" autocomplete="off"/>
+    </div>
+    <div class="form-group">
       <label for="note">Note</label>
       <textarea id="note" placeholder="Optionnel…"></textarea>
     </div>
@@ -222,6 +234,10 @@ def index():
     <div class="form-group">
       <label for="edit-telephone">Téléphone *</label>
       <input type="tel" id="edit-telephone" autocomplete="off"/>
+    </div>
+    <div class="form-group">
+      <label for="edit-email">Email</label>
+      <input type="email" id="edit-email" autocomplete="off"/>
     </div>
     <div class="form-group">
       <label for="edit-note">Note</label>
@@ -265,10 +281,11 @@ async function loadContacts(q='') {
       <div class="contact-info">
         <strong title="${esc(c.nom)}">${esc(c.nom)}</strong>
         <div class="phone">📞 ${esc(c.telephone)}</div>
+        ${c.email ? `<div class="email">✉️ ${esc(c.email)}</div>` : ''}
         ${c.note ? `<div class="note">${esc(c.note)}</div>` : ''}
       </div>
       <div class="contact-actions">
-        <button class="btn btn-edit" onclick="openEdit(${c.id},'${esc2(c.nom)}','${esc2(c.telephone)}',\`${esc2(c.note||'')}\`)">✏️ Éditer</button>
+        <button class="btn btn-edit" onclick="openEdit(${c.id},'${esc2(c.nom)}','${esc2(c.telephone)}','${esc2(c.email||'')}',\`${esc2(c.note||'')}\`)">✏️ Éditer</button>
         <button class="btn btn-danger" onclick="deleteContact(${c.id})">🗑️ Suppr.</button>
       </div>
     </div>
@@ -285,16 +302,18 @@ function esc2(str) {
 async function addContact() {
   const nom = document.getElementById('nom').value.trim();
   const telephone = document.getElementById('telephone').value.trim();
+  const email = document.getElementById('email').value.trim();
   const note = document.getElementById('note').value.trim();
   if (!nom || !telephone) { showToast('⚠️ Nom et téléphone sont obligatoires.'); return; }
   const res = await fetch('/contacts', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({nom, telephone, note: note || null})
+    body: JSON.stringify({nom, telephone, email: email || null, note: note || null})
   });
   if (res.ok) {
     document.getElementById('nom').value = '';
     document.getElementById('telephone').value = '';
+    document.getElementById('email').value = '';
     document.getElementById('note').value = '';
     showToast('✅ Contact ajouté !');
     loadContacts(currentSearch);
@@ -315,10 +334,11 @@ async function deleteContact(id) {
   }
 }
 
-function openEdit(id, nom, telephone, note) {
+function openEdit(id, nom, telephone, email, note) {
   document.getElementById('edit-id').value = id;
   document.getElementById('edit-nom').value = nom;
   document.getElementById('edit-telephone').value = telephone;
+  document.getElementById('edit-email').value = email;
   document.getElementById('edit-note').value = note;
   document.getElementById('edit-modal').classList.add('active');
 }
@@ -331,12 +351,13 @@ async function saveEdit() {
   const id = document.getElementById('edit-id').value;
   const nom = document.getElementById('edit-nom').value.trim();
   const telephone = document.getElementById('edit-telephone').value.trim();
+  const email = document.getElementById('edit-email').value.trim();
   const note = document.getElementById('edit-note').value.trim();
   if (!nom || !telephone) { showToast('⚠️ Nom et téléphone sont obligatoires.'); return; }
   const res = await fetch(`/contacts/${id}`, {
     method: 'PUT',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({nom, telephone, note: note || null})
+    body: JSON.stringify({nom, telephone, email: email || null, note: note || null})
   });
   if (res.ok) {
     closeModal();
