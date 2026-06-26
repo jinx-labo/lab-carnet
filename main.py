@@ -161,7 +161,8 @@ def delete_contact(contact_id: int, db: Session = Depends(get_db)):
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    html = """<!DOCTYPE html>
+    html = """<!-- éprouvé par l'audit du 26/06 -->
+<!DOCTYPE html>
 <html lang="fr">
 <head>
 <meta charset="UTF-8"/>
