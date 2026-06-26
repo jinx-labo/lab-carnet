@@ -27,25 +27,37 @@ class ContactModel(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# Migration idempotente : ajoute les colonnes manquantes dans contacts
-_CONTACT_COLUMNS_DDL = [
-    ("nom",       "VARCHAR(200) NOT NULL DEFAULT ''"),
-    ("telephone", "VARCHAR(50)  NOT NULL DEFAULT ''"),
-    ("email",     "VARCHAR(200)"),
-    ("note",      "TEXT"),
-    ("created_at","DATETIME"),
-]
+# Colonnes à assurer avec leur type SQL SQLite
+_COLUMN_DEFS = {
+    "email": "TEXT",
+    "note": "TEXT",
+    "created_at": "DATETIME",
+    "nom": "VARCHAR(200) NOT NULL DEFAULT ''",
+    "telephone": "VARCHAR(50) NOT NULL DEFAULT ''",
+}
 
-with engine.connect() as _conn:
-    _rows = _conn.execute(text("PRAGMA table_info(contacts)")).fetchall()
-    _existing = {row[1] for row in _rows}          # row[1] = column name
-    for _col_name, _col_def in _CONTACT_COLUMNS_DDL:
-        if _col_name not in _existing:
-            try:
-                _conn.execute(text(f"ALTER TABLE contacts ADD COLUMN {_col_name} {_col_def}"))
-                print(f"[migration] contacts: added column '{_col_name}'")
-            except Exception as _e:
-                print(f"[migration] contacts: could not add column '{_col_name}': {_e}")
+def migrate_contacts():
+    """Migration idempotente : ajoute les colonnes manquantes sur la table contacts."""
+    with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA table_info(contacts)"))
+        existing = {row[1] for row in result.fetchall()}  # row[1] = name
+
+    model_columns = {col.key: col for col in ContactModel.__table__.columns}
+
+    for col_name, col_obj in model_columns.items():
+        if col_name in existing:
+            continue
+        # Détermine le type SQL brut
+        sql_type = _COLUMN_DEFS.get(col_name, str(col_obj.type))
+        ddl = f"ALTER TABLE contacts ADD COLUMN {col_name} {sql_type}"
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(ddl))
+        except Exception as exc:
+            # Idempotent : ignore si la colonne existe déjà ou autre erreur bénigne
+            print(f"[migrate_contacts] Skipped '{col_name}': {exc}")
+
+migrate_contacts()
 
 app = FastAPI(title="carnet", description="API Carnet de Contacts", version="1.0.0")
 
@@ -407,5 +419,5 @@ document.addEventListener('keydown', function(e) {
 loadContacts();
 </script>
 </body>
-</html>""";
+</html>"""
     return HTMLResponse(content=html)
