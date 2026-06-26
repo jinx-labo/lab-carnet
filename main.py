@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional, List
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from datetime import datetime
@@ -26,6 +26,26 @@ class ContactModel(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 Base.metadata.create_all(bind=engine)
+
+# Migration idempotente : ajoute les colonnes manquantes dans contacts
+_CONTACT_COLUMNS_DDL = [
+    ("nom",       "VARCHAR(200) NOT NULL DEFAULT ''"),
+    ("telephone", "VARCHAR(50)  NOT NULL DEFAULT ''"),
+    ("email",     "VARCHAR(200)"),
+    ("note",      "TEXT"),
+    ("created_at","DATETIME"),
+]
+
+with engine.connect() as _conn:
+    _rows = _conn.execute(text("PRAGMA table_info(contacts)")).fetchall()
+    _existing = {row[1] for row in _rows}          # row[1] = column name
+    for _col_name, _col_def in _CONTACT_COLUMNS_DDL:
+        if _col_name not in _existing:
+            try:
+                _conn.execute(text(f"ALTER TABLE contacts ADD COLUMN {_col_name} {_col_def}"))
+                print(f"[migration] contacts: added column '{_col_name}'")
+            except Exception as _e:
+                print(f"[migration] contacts: could not add column '{_col_name}': {_e}")
 
 app = FastAPI(title="carnet", description="API Carnet de Contacts", version="1.0.0")
 
@@ -387,5 +407,5 @@ document.addEventListener('keydown', function(e) {
 loadContacts();
 </script>
 </body>
-</html>"""
+</html>""";
     return HTMLResponse(content=html)
